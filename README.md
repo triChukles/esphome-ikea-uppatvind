@@ -5,14 +5,15 @@
 ## Overview
 
 This is a modification of the [Ikea UPPÅTVIND](https://www.ikea.com/us/en/p/uppatvind-air-purifier-60498228/) air purifier into a "smart" purifier, specifically by using ESP8266 or ESP32 wifi microcontroller with [ESPHome](https://esphome.io/) so that the air purifier can be remotely controlled by [Home Assistant](https://www.home-assistant.io/).
-I used an ESP32-C6 (Seeed Studio XIAO ESP32-C6)
+I used an ESP32-C6 (Seeed Studio XIAO ESP32-C6) and used an european UPPÅTVIND (from austria, dont know if there are different versions but just in case there are differences i wanted to let you know it)
 
 The goal is to be able to remotely:
 - View UPPÅTVIND fan speed
 - Change the UPPÅTVIND fan speed
 
 This can be done using an ESP8266 or ESP32 to:
-- Sense the LED brightness, which matches the fans speed (off, low, medium, high) 
+- Sense the LED brightness, which matches the fans speed (off, low, medium, high)
+- select preferred speed and it changes it automatically 
 - Press the button to change the fan speed
 
 ![Home Assistant Cards](images/homeassistant.png)
@@ -112,7 +113,7 @@ IKEA UPPÅTVIND MAIN PCB
           └──────────────────────────────────┼───┘
                                            [2kΩ]
                                              │
-                                            GND
+                                         GND / TP2
 
 
 
@@ -155,7 +156,7 @@ wifi:
 
 
     
-# Open-Drain Output connected to TP4 (Button) via XIAO pin D2 (GPIO21)
+# Output connected to TP4 (Button) via XIAO pin D2 (GPIO21)
 output:
   - platform: gpio
     id: tp4_output
@@ -191,3 +192,72 @@ There is a red LED on the UPPÅTVIND for the filter change indicator. This LED s
 I haven't had the UPPÅTVIND long enough for the LED to turn on. It's probably based on total runtime time since Ikea suggests changing filter 6 months.
 
 This LED (which is at LED2/TP6) could also be wired up to the ESP8266/ESP32 so its state can be sent to Home Assistant to trigger a notification.
+
+## HomeAssistant sensor and script
+
+I put this in the configuration.yaml in my HomeAssistant.
+I then get a "select" sensor in HA which i can change and the level of the fan changes.
+
+The levels of the fan correlate to the led pulse width, but its weird, the off state isnt always the same for me and the other pulse width numbers differ 1-2 from time to time.
+
+```yaml
+template:
+  - select:
+      - name: "Uppåtvind Mode"
+        unique_id: uppatvind_air_purifier_mode
+        state: >-
+          {% set val = states('sensor.airfilter_led_pulse_width') | float(0) %}
+          {% if 10 <= val <= 35 %} Low
+          {% elif 85 <= val <= 115 %} Medium
+          {% elif 300 <= val <= 340 %} High
+          {% else %} Off
+          {% endif %}
+
+                options: "{{ ['Off', 'Low', 'Medium', 'High'] }}"
+        
+        # When you select a mode in HA, trigger the calculation script
+        select_option:
+          - action: script.turn_on
+            target:
+              entity_id: script.set_uppatvind_mode
+            data:
+              variables:
+                target_mode: "{{ option }}"
+
+script:
+  set_uppatvind_mode:
+    alias: "Set Uppatvind Mode"
+    sequence:
+      - variables:
+          current_val: "{{ states('sensor.airfilter_led_pulse_width') | float(0) }}"
+          current_mode: >-
+            {% if 10 <= current_val <= 35 %} Low
+            {% elif 85 <= current_val <= 115 %} Medium
+            {% elif 300 <= current_val <= 340 %} High
+            {% else %} Off
+            {% endif %}
+          mapping:
+            "Off": 0
+            "Low": 1
+            "Medium": 2
+            "High": 3
+          current_idx: "{{ mapping.get(current_mode, 0) }}"
+          target_idx: "{{ mapping.get(target_mode, 0) }}"
+          # Calculate exact steps forward in the cycle (Off -> Low -> Med -> High -> Off)
+          steps: "{{ (target_idx - current_idx + 4) % 4 }}"
+      
+      - condition: template
+        value_template: "{{ steps > 0 }}"
+
+      - repeat:
+          count: "{{ steps }}"
+          sequence:
+            - action: button.press
+              target:
+                entity_id: button.airfilter_uppatvind_speed_button  # Make sure this matches your exact button entity ID!
+            - delay: "00:00:00.8"
+```
+
+## Automation
+I use the air filter in combination with a motion sensor, so if my cat goes to their toilet and activates the sensor the air filter level is increased to medium for 10 minutes and after that back to low.
+
