@@ -101,7 +101,7 @@ U1--TP7--LED1--GND
 
 
 ### Wiring Diagram
-
+```
 IKEA UPPÅTVIND MAIN PCB
           ┌──────────────────────────────────────┐
           │  [5V Power / TP3] ───────────────────┼──────────► ESP32 5V
@@ -114,8 +114,7 @@ IKEA UPPÅTVIND MAIN PCB
                                            [2kΩ]
                                              │
                                          GND / TP2
-
-
+```
 
 ## ESPHome
 
